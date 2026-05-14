@@ -1,0 +1,310 @@
+
+<h2 class="sr-only">Visualizzatore interattivo di conformal mapping: mostra la trasformazione di una griglia nel piano complesso sotto varie funzioni olomorfe.</h2>
+
+<style>
+  :root { --pad: 16px; }
+  .cm-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 1rem 0; }
+  .cm-panel { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 12px; }
+  .cm-label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; letter-spacing: 0.03em; }
+  canvas { border-radius: var(--border-radius-md); display: block; width: 100%; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  select, input[type=range] { width: 100%; }
+  .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+  .ctrl-label { font-size: 12px; color: var(--color-text-secondary); }
+  .row-sliders { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .val { font-size: 12px; font-weight: 500; color: var(--color-text-primary); }
+  .func-info { font-size: 12px; color: var(--color-text-secondary); margin-top: 6px; padding: 8px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); font-family: var(--font-mono); }
+  .cm-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 8px; }
+  .animate-btn { font-size: 13px; cursor: pointer; }
+</style>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">Funzione f(z)</span>
+    <select id="funcSel">
+      <option value="z2">z²</option>
+      <option value="z3">z³</option>
+      <option value="exp">exp(z)</option>
+      <option value="log">log(z)</option>
+      <option value="sin">sin(z)</option>
+      <option value="cos">cos(z)</option>
+      <option value="sinh">sinh(z)</option>
+      <option value="moebius">Möbius (z+1)/(z-1)</option>
+      <option value="z_inv">1/z</option>
+      <option value="zplus1z">z + 1/z  (Joukowski)</option>
+      <option value="sqrt">√z</option>
+      <option value="ez2">exp(-z²)</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Dominio</span>
+    <select id="domSel">
+      <option value="rect">Griglia rettangolare</option>
+      <option value="polar">Griglia polare</option>
+      <option value="strip">Striscia orizzontale</option>
+      <option value="disk">Disco unitario</option>
+    </select>
+  </div>
+</div>
+
+<div class="row-sliders">
+  <div class="ctrl-group">
+    <span class="ctrl-label">Linee <span class="val" id="nLinesVal">12</span></span>
+    <input type="range" id="nLines" min="4" max="24" value="12" step="2">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Zoom dom. <span class="val" id="zoomDomVal">1.8</span></span>
+    <input type="range" id="zoomDom" min="0.5" max="4" value="1.8" step="0.1">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Zoom cod. <span class="val" id="zoomCodVal">auto</span></span>
+    <input type="range" id="zoomCod" min="0.3" max="6" value="2" step="0.1">
+  </div>
+</div>
+
+<div style="margin-bottom: 10px; display:flex; align-items:center; gap:12px;">
+  <button class="animate-btn" id="animBtn"><i class="ti ti-player-play" aria-hidden="true"></i> Anima</button>
+  <span class="ctrl-label" style="margin:0;">Fase animazione: <span class="val" id="phaseVal">0.00</span></span>
+  <input type="range" id="phaseSlider" min="0" max="1" value="0" step="0.01" style="flex:1;">
+</div>
+
+<div class="cm-wrap">
+  <div class="cm-panel">
+    <div class="cm-title">Dominio  (piano z)</div>
+    <div class="cm-label" id="domLabel">griglia rettangolare</div>
+    <canvas id="cDom" width="320" height="320"></canvas>
+  </div>
+  <div class="cm-panel">
+    <div class="cm-title">Codominio  (piano w = f(z))</div>
+    <div class="cm-label" id="codLabel">immagine della griglia</div>
+    <canvas id="cCod" width="320" height="320"></canvas>
+  </div>
+</div>
+
+<div class="func-info" id="funcInfo">f(z) = z²</div>
+
+<script>
+const FUNCS = {
+  z2:     { label:'f(z) = z²',             fn:(a,b)=>{ return [a*a-b*b, 2*a*b]; } },
+  z3:     { label:'f(z) = z³',             fn:(a,b)=>{ return [a*a*a-3*a*b*b, 3*a*a*b-b*b*b]; } },
+  exp:    { label:'f(z) = exp(z)',          fn:(a,b)=>{ const e=Math.exp(a); return [e*Math.cos(b), e*Math.sin(b)]; } },
+  log:    { label:'f(z) = log(z)  (ramo principale)', fn:(a,b)=>{ const r=Math.sqrt(a*a+b*b); if(r<1e-10) return [NaN,NaN]; return [Math.log(r), Math.atan2(b,a)]; } },
+  sin:    { label:'f(z) = sin(z)',          fn:(a,b)=>{ return [Math.sin(a)*Math.cosh(b), Math.cos(a)*Math.sinh(b)]; } },
+  cos:    { label:'f(z) = cos(z)',          fn:(a,b)=>{ return [Math.cos(a)*Math.cosh(b), -Math.sin(a)*Math.sinh(b)]; } },
+  sinh:   { label:'f(z) = sinh(z)',         fn:(a,b)=>{ return [Math.sinh(a)*Math.cos(b), Math.cosh(a)*Math.sin(b)]; } },
+  moebius:{ label:'f(z) = (z+1)/(z−1)',    fn:(a,b)=>{ const den=(a-1)*(a-1)+b*b; if(den<1e-12) return [NaN,NaN]; return [((a+1)*(a-1)+b*b)/den, 2*b/den]; } },
+  z_inv:  { label:'f(z) = 1/z',            fn:(a,b)=>{ const d=a*a+b*b; if(d<1e-12) return [NaN,NaN]; return [a/d,-b/d]; } },
+  zplus1z:{ label:'f(z) = z + 1/z  (Joukowski)', fn:(a,b)=>{ const d=a*a+b*b; if(d<1e-12) return [NaN,NaN]; return [a+a/d, b-b/d]; } },
+  sqrt:   { label:'f(z) = √z  (ramo principale)', fn:(a,b)=>{ const r=Math.sqrt(Math.sqrt(a*a+b*b)); const th=Math.atan2(b,a)/2; return [r*Math.cos(th),r*Math.sin(th)]; } },
+  ez2:    { label:'f(z) = exp(−z²)',        fn:(a,b)=>{ const re=-(a*a-b*b); const im=-2*a*b; const e=Math.exp(re); return [e*Math.cos(im),e*Math.sin(im)]; } },
+};
+
+const DOMS = {
+  rect: { label:'griglia rettangolare' },
+  polar:{ label:'griglia polare' },
+  strip:{ label:'striscia  −π < Im(z) < π' },
+  disk: { label:'disco unitario |z| ≤ 1' },
+};
+
+const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const COLORS = {
+  hLines: () => isDark() ? '#3A82F6' : '#1D4ED8',
+  vLines: () => isDark() ? '#F97316' : '#C2410C',
+  axis:   () => isDark() ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)',
+  bg:     () => isDark() ? '#1a1a1a' : '#f8f8f6',
+  text:   () => isDark() ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
+};
+
+const N_POINTS = 300;
+
+function getGridLines(dom, n, zoomDom, phase) {
+  const lines = [];
+  if (dom === 'rect') {
+    const R = zoomDom;
+    for (let i = 0; i <= n; i++) {
+      const t = -R + 2*R*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) pts.push([t + phase*0, -R + 2*R*j/N_POINTS]);
+      lines.push({ pts, horiz: true });
+    }
+    for (let i = 0; i <= n; i++) {
+      const t = -R + 2*R*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) pts.push([-R + 2*R*j/N_POINTS, t]);
+      lines.push({ pts, horiz: false });
+    }
+  } else if (dom === 'polar') {
+    const R = zoomDom;
+    for (let i = 1; i <= n; i++) {
+      const r = R*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) {
+        const th = 2*Math.PI*j/N_POINTS;
+        pts.push([r*Math.cos(th), r*Math.sin(th)]);
+      }
+      lines.push({ pts, horiz: false });
+    }
+    for (let i = 0; i < n; i++) {
+      const th = 2*Math.PI*i/n + phase*Math.PI*2;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) {
+        const r = R*j/N_POINTS;
+        pts.push([r*Math.cos(th), r*Math.sin(th)]);
+      }
+      lines.push({ pts, horiz: true });
+    }
+  } else if (dom === 'strip') {
+    const R = zoomDom * 2;
+    for (let i = 0; i <= n; i++) {
+      const y = -Math.PI + 2*Math.PI*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) pts.push([-R + 2*R*j/N_POINTS, y]);
+      lines.push({ pts, horiz: true });
+    }
+    for (let i = 0; i <= n; i++) {
+      const x = -R + 2*R*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) pts.push([x, -Math.PI + 2*Math.PI*j/N_POINTS]);
+      lines.push({ pts, horiz: false });
+    }
+  } else if (dom === 'disk') {
+    for (let i = 1; i <= n; i++) {
+      const r = i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) {
+        const th = 2*Math.PI*j/N_POINTS;
+        pts.push([r*Math.cos(th), r*Math.sin(th)]);
+      }
+      lines.push({ pts, horiz: false });
+    }
+    for (let i = 0; i < n; i++) {
+      const th = 2*Math.PI*i/n;
+      const pts = [];
+      for (let j = 0; j <= N_POINTS; j++) {
+        const r = j/N_POINTS;
+        pts.push([r*Math.cos(th), r*Math.sin(th)]);
+      }
+      lines.push({ pts, horiz: true });
+    }
+  }
+  return lines;
+}
+
+function drawCanvas(ctx, lines, fn, isTarget, zoomPx) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.bg();
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W/2, cy = H/2;
+  const scale = Math.min(W,H)/2 / zoomPx;
+
+  const toScreen = (x,y) => [cx + x*scale, cy - y*scale];
+
+  ctx.strokeStyle = COLORS.axis();
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke();
+
+  ctx.font = `10px var(--font-mono, monospace)`;
+  ctx.fillStyle = COLORS.text();
+  ctx.fillText('Re', W-20, cy-4);
+  ctx.fillText('Im', cx+4, 12);
+
+  const MAX_COORD = 1e5;
+
+  lines.forEach(line => {
+    ctx.strokeStyle = line.horiz ? COLORS.hLines() : COLORS.vLines();
+    ctx.lineWidth = 0.9;
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    let started = false;
+    line.pts.forEach(([a,b]) => {
+      let x = a, y = b;
+      if (isTarget && fn) {
+        const [rx,ry] = fn(a,b);
+        x = rx; y = ry;
+      }
+      if (!isFinite(x) || !isFinite(y) || Math.abs(x)>MAX_COORD || Math.abs(y)>MAX_COORD) {
+        started = false; return;
+      }
+      const [sx,sy] = toScreen(x,y);
+      if (!started) { ctx.moveTo(sx,sy); started=true; }
+      else ctx.lineTo(sx,sy);
+    });
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function autoZoomCod(lines, fn) {
+  let maxR = 0;
+  lines.forEach(line => {
+    for (let i=0; i<line.pts.length; i+=10) {
+      const [a,b] = line.pts[i];
+      const [rx,ry] = fn(a,b);
+      if (isFinite(rx)&&isFinite(ry)) {
+        const r = Math.sqrt(rx*rx+ry*ry);
+        if (r > maxR && r < 1e4) maxR = r;
+      }
+    }
+  });
+  return maxR < 0.01 ? 2 : maxR * 1.1;
+}
+
+const cDom = document.getElementById('cDom');
+const cCod = document.getElementById('cCod');
+const ctxD = cDom.getContext('2d');
+const ctxC = cCod.getContext('2d');
+
+let animId = null, animating = false, phase = 0;
+
+function render() {
+  const funcKey = document.getElementById('funcSel').value;
+  const domKey  = document.getElementById('domSel').value;
+  const n       = parseInt(document.getElementById('nLines').value);
+  const zoomDom = parseFloat(document.getElementById('zoomDom').value);
+  const zoomCodManual = parseFloat(document.getElementById('zoomCod').value);
+  const ph      = parseFloat(document.getElementById('phaseSlider').value);
+
+  document.getElementById('nLinesVal').textContent = n;
+  document.getElementById('zoomDomVal').textContent = zoomDom.toFixed(1);
+  document.getElementById('phaseVal').textContent = ph.toFixed(2);
+  document.getElementById('funcInfo').textContent = FUNCS[funcKey].label;
+  document.getElementById('domLabel').textContent = DOMS[domKey].label;
+
+  const fn = FUNCS[funcKey].fn;
+  const lines = getGridLines(domKey, n, zoomDom, ph);
+
+  const autoZ = autoZoomCod(lines, fn);
+  document.getElementById('zoomCodVal').textContent = zoomCodManual.toFixed(1);
+
+  drawCanvas(ctxD, lines, null, false, zoomDom);
+  drawCanvas(ctxC, lines, fn,   true,  zoomCodManual);
+}
+
+document.querySelectorAll('select, input[type=range]').forEach(el => {
+  el.addEventListener('input', () => { if(!animating) render(); });
+});
+
+document.getElementById('animBtn').addEventListener('click', () => {
+  if (animating) {
+    animating = false;
+    cancelAnimationFrame(animId);
+    document.getElementById('animBtn').innerHTML = '<i class="ti ti-player-play" aria-hidden="true"></i> Anima';
+  } else {
+    animating = true;
+    document.getElementById('animBtn').innerHTML = '<i class="ti ti-player-pause" aria-hidden="true"></i> Pausa';
+    let t = parseFloat(document.getElementById('phaseSlider').value);
+    const step = () => {
+      t = (t + 0.004) % 1;
+      document.getElementById('phaseSlider').value = t;
+      render();
+      animId = requestAnimationFrame(step);
+    };
+    animId = requestAnimationFrame(step);
+  }
+});
+
+render();
+</script>
